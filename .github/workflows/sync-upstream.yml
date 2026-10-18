@@ -1,3 +1,4 @@
+
 name: Sync upstream and build Android 12
 
 on:
@@ -26,8 +27,7 @@ jobs:
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream \
             https://github.com/seijikohara/femto-car-launcher.git
@@ -72,27 +72,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: ''
-          cmdline-tools-version: 16.0
+          cmdline-tools-version: "14742923"
+          packages: ""
 
       - name: Install Android SDK packages
         run: |
           sdkmanager --install \
+            "platform-tools" \
             "platforms;android-37" \
             "build-tools;36.0.0"
-          yes | sdkmanager --licenses
 
       - name: Build Android 12 APK
         run: |
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew assembleStableDebug
+          ./gradlew --no-daemon assembleStableDebug
 
       - name: Verify APK exists
+        id: apk
         run: |
           APK=$(find app/build/outputs/apk/stable/debug \
             -maxdepth 1 -name '*.apk' -print -quit)
@@ -103,16 +105,15 @@ jobs:
           fi
 
           echo "Found APK: $APK"
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Verify APK minimum SDK
         run: |
-          APK=$(find app/build/outputs/apk/stable/debug \
-            -maxdepth 1 -name '*.apk' -print -quit)
-
+          APK="${{ steps.apk.outputs.path }}"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
 
           "$AAPT" dump badging "$APK" \
-            | grep -E 'package:|sdkVersion:|targetSdkVersion:'
+            | grep -E "package:|sdkVersion:|targetSdkVersion:"
 
           SDK_VERSION=$("$AAPT" dump badging "$APK" \
             | sed -n "s/.*sdkVersion:'\([0-9]*\)'.*/\1/p")

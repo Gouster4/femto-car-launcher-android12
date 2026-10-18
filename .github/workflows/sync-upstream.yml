@@ -1,0 +1,64 @@
+
+name: Sync upstream and build Android 12
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android12-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Android 12 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android12
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream \
+            https://github.com/seijikohara/femto-car-launcher.git
+
+      - name: Merge upstream main
+        run: |
+          git fetch upstream main
+          git merge --no-edit upstream/main
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Android 12 APK
+        run: |
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew assembleStableDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: femto-car-launcher-android12
+          path: app/build/outputs/apk/stable/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Push synced branch
+        run: git push origin HEAD:android12

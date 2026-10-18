@@ -86,7 +86,15 @@ jobs:
         run: |
           test -n "$(find app/build/outputs/apk/stable/debug \
             -maxdepth 1 -name '*.apk' -print -quit)"
+            
+      - name: Verify APK minimum SDK
+        run: |
+          APK=$(find app/build/outputs/apk/stable/debug \
+            -maxdepth 1 -name '*.apk' -print -quit)
 
+          $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" \
+            | grep -E 'package:|sdkVersion:|targetSdkVersion:'
+    
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

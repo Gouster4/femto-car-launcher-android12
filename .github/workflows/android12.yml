@@ -1,0 +1,171 @@
+name: Sync upstream and build Android 12
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android12-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the Android 12 branch
+      - name: Check out Android 12 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android12
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. Configure Git
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream \
+            https://github.com/seijikohara/femto-car-launcher.git
+
+      # 3. Merge upstream develop
+      - name: Merge upstream develop
+        run: |
+          git fetch upstream develop
+          git merge --no-edit -X theirs upstream/develop
+
+      # 4. Enforce minimum SDK 31 for Android 12
+      - name: Enforce minimum SDK 31
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("app/build.gradle.kts")
+          content = path.read_text()
+
+          updated, count = re.subn(
+              r'(?m)^(\s*minSdk\s*=\s*)\d+\b',
+              r'\g<1>31',
+              content
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  f"Expected exactly one minSdk assignment; found {count}"
+              )
+
+          path.write_text(updated)
+          print("Verified: minSdk = 31")
+          PY
+
+          git add app/build.gradle.kts
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Enforce minSdk 31 for Android 12"
+          fi
+
+      # 5. Set up Java
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      # 6. Set up Android SDK
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: "14742923"
+          packages: ""
+
+      # 7. Install Android SDK packages
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-37" \
+            "build-tools;36.0.0"
+
+      # 8. Build APK
+      - name: Build Android 12 APK
+        run: |
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew --no-daemon assembleStableDebug
+
+      # 9. Verify APK exists
+      - name: Verify APK exists
+        id: apk
+        run: |
+          APK="app/build/outputs/apk/stable/debug/app-stable-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated at $APK"
+            find app/build/outputs/apk -type f -name '*.apk' || true
+            exit 1
+          fi
+
+          echo "Found APK: $APK"
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+
+      # 10. Verify minimum SDK
+      - name: Verify APK minimum SDK
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+
+          "$AAPT" dump badging "$APK" \
+            | grep -E "package:|sdkVersion:|targetSdkVersion:"
+
+          SDK_VERSION=$("$AAPT" dump badging "$APK" \
+            | sed -n "s/.*sdkVersion:'\([0-9]*\)'.*/\1/p")
+
+          if [ "$SDK_VERSION" != "31" ]; then
+            echo "ERROR: Expected minimum SDK 31, got $SDK_VERSION"
+            exit 1
+          fi
+
+          echo "SUCCESS: APK minimum SDK is 31"
+
+      # 11. Push updated source branch
+      - name: Push synced branch
+        run: git push origin HEAD:android12
+
+      # 12. Generate a unique release tag
+      - name: Generate release tag
+        id: release_tag
+        run: |
+          TAG="android12-$(date -u +%Y%m%d)-run${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+      # 13. Publish APK as a GitHub Release
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          TAG="${{ steps.release_tag.outputs.tag }}"
+
+          gh release create "$TAG" \
+            "$APK" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target android12 \
+            --title "Android 12 APK - $TAG" \
+            --notes "Automated Android 12 build.
+
+          Minimum supported Android SDK: 31 (Android 12).
+          Compile SDK: 37.
+          Source branch: android12.
+          Upstream: seijikohara/femto-car-launcher develop.
+
+          Built and verified by GitHub Actions."

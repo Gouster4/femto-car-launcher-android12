@@ -1,4 +1,5 @@
-name: Sync upstream and build Android 12 Automatic Release
+
+name: Sync upstream and build Android 12
 
 on:
   schedule:
@@ -17,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Check out the Android 12 branch
+      # 1. Check out Android 12 branch
       - name: Check out Android 12 branch
         uses: actions/checkout@v4
         with:
@@ -41,7 +42,7 @@ jobs:
           git fetch upstream develop
           git merge --no-edit -X theirs upstream/develop
 
-      # 4. Enforce minimum SDK 31 for Android 12
+      # 4. Enforce minimum SDK 31
       - name: Enforce minimum SDK 31
         run: |
           python3 - <<'PY'
@@ -89,11 +90,25 @@ jobs:
 
       # 7. Install Android SDK packages
       - name: Install Android SDK packages
+        shell: bash
         run: |
+          set -euo pipefail
+
+          echo "Checking available Android SDK platforms..."
+
+          if ! sdkmanager --list | grep -Fq "platforms;android-37.0"; then
+            echo "ERROR: platforms;android-37.0 is not available."
+            echo "Available Android platform packages:"
+            sdkmanager --list | grep -E 'platforms;android-[0-9]+' || true
+            exit 1
+          fi
+
           sdkmanager --install \
             "platform-tools" \
-            "platforms;android-37" \
+            "platforms;android-37.0" \
             "build-tools;36.0.0"
+
+          yes | sdkmanager --licenses || true
 
       # 8. Build APK
       - name: Build Android 12 APK
@@ -102,14 +117,18 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew --no-daemon assembleStableDebug
 
-      # 9. Verify APK exists
+      # 9. Locate and verify APK exists
       - name: Verify APK exists
         id: apk
+        shell: bash
         run: |
+          set -euo pipefail
+
           APK="app/build/outputs/apk/stable/debug/app-stable-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated at $APK"
+            echo "Expected APK not found: $APK"
+            echo "Searching for generated APK files..."
             find app/build/outputs/apk -type f -name '*.apk' || true
             exit 1
           fi
@@ -117,17 +136,27 @@ jobs:
           echo "Found APK: $APK"
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
-      # 10. Verify minimum SDK
+      # 10. Verify APK minimum SDK
       - name: Verify APK minimum SDK
+        shell: bash
         run: |
+          set -euo pipefail
+
           APK="${{ steps.apk.outputs.path }}"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+
+          if [ ! -x "$AAPT" ]; then
+            echo "ERROR: aapt not found at $AAPT"
+            exit 1
+          fi
 
           "$AAPT" dump badging "$APK" \
             | grep -E "package:|sdkVersion:|targetSdkVersion:"
 
-          SDK_VERSION=$("$AAPT" dump badging "$APK" \
-            | sed -n "s/.*sdkVersion:'\([0-9]*\)'.*/\1/p")
+          SDK_VERSION=$(
+            "$AAPT" dump badging "$APK" \
+              | sed -n "s/.*sdkVersion:'\([0-9]*\)'.*/\1/p"
+          )
 
           if [ "$SDK_VERSION" != "31" ]; then
             echo "ERROR: Expected minimum SDK 31, got $SDK_VERSION"
@@ -136,13 +165,14 @@ jobs:
 
           echo "SUCCESS: APK minimum SDK is 31"
 
-      # 11. Push updated source branch
+      # 11. Push synced source branch
       - name: Push synced branch
         run: git push origin HEAD:android12
 
-      # 12. Generate a unique release tag
+      # 12. Generate unique release tag
       - name: Generate release tag
         id: release_tag
+        shell: bash
         run: |
           TAG="android12-$(date -u +%Y%m%d)-run${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -153,6 +183,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           APK="${{ steps.apk.outputs.path }}"
           TAG="${{ steps.release_tag.outputs.tag }}"
 

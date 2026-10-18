@@ -1,4 +1,4 @@
-name: Sync upstream and build Android 12
+name: Sync upstream and build Android 12 Automatic Release
 
 on:
   schedule:

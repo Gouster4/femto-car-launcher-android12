@@ -57,7 +57,8 @@ export interface GlFollowMap {
     jumpTo(opts: FollowCameraOpts): unknown;
     on(type: string, listener: (ev: { originalEvent?: unknown }) => void): unknown;
     getBearing(): number;
-    getContainer(): HTMLElement;
+    // Only the container's size is read (for the camera padding).
+    getContainer(): Pick<HTMLElement, "clientWidth" | "clientHeight">;
     resize(): unknown;
     triggerRepaint(): unknown;
 }
@@ -87,8 +88,10 @@ export interface FollowEngine {
     setFollow: Window["setFollow"];
     setNorthUp: Window["setNorthUp"];
     // Host lifecycle resume: re-measure and repaint so the map recovers after
-    // a pause/resume cycle (guards a stale GL surface on Android).
-    onHostResume(): void;
+    // a pause/resume cycle (guards a stale GL surface on Android). A
+    // function-typed property like the bridge functions above: the backend
+    // installs it on window unbound, so it must not read `this`.
+    onHostResume: () => void;
 }
 
 export function createFollowEngine(deps: FollowEngineDeps): FollowEngine {
@@ -394,10 +397,10 @@ export function createFollowEngine(deps: FollowEngineDeps): FollowEngine {
             }
         },
         setFollow(follow): void {
-            setFollowing(!!follow);
+            setFollowing(follow);
         },
         setNorthUp(enabled): void {
-            state.northUp = !!enabled;
+            state.northUp = enabled;
             // Re-orient immediately while following; a detached camera keeps
             // the user's rotation until re-attach. The chevron flips with the
             // camera — waiting for the next fix would leave it pointing wrong

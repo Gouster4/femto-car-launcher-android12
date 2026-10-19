@@ -104,34 +104,37 @@ import { createMarkerTransition } from "../marker-motion";
 // overlay.
 import { type MarkerSpot, markerSpot } from "../style";
 
-// The Google Maps bridge extends the base femtoBridge with googleMapsApiKey()
-// and googleMapsMapId(), present only when the host has wired up the Google
-// Maps backend.
-interface GoogleMapsFemtoBridge {
-    onMapEvent(kind: string, detail: string): void;
-    // Synchronous getter injected by the host; returns the Google Maps API
-    // key. Returns an empty string when unconfigured.
-    googleMapsApiKey(): string;
-    // Synchronous getter injected by the host; returns the Cloud Map ID the
-    // user supplied, or "" when unconfigured. Independent of the rendering
-    // mode below (Maps JS 3.56.10+ renders vector without a Map ID); the Map ID
-    // still gates advanced markers and cloud styling.
-    googleMapsMapId(): string;
-    // Synchronous getter injected by the host; the user's rendering choice as
-    // the Kotlin enum name: "AUTO" | "RASTER" | "VECTOR".
-    googleMapsRendering(): string;
-    // Synchronous getter injected by the host; the map's light/dark context
-    // resolved by the host from the Map style setting and the app theme, as
-    // a google.maps.ColorScheme name: "LIGHT" | "DARK". Construction-time
-    // only, so a change rebuilds the page (see WebMapView's effectiveGoogleDark).
-    googleMapsColorScheme(): string;
+// The Google Maps getters on the femtoBridge (see bridge.ts), present only
+// when the host has wired up the Google Maps backend — hence optional, and
+// feature-detected at each read.
+declare global {
+    interface FemtoBridge {
+        // Synchronous getter injected by the host; returns the Google Maps API
+        // key. Returns an empty string when unconfigured.
+        googleMapsApiKey?(): string;
+        // Synchronous getter injected by the host; returns the Cloud Map ID the
+        // user supplied, or "" when unconfigured. Independent of the rendering
+        // mode below (Maps JS 3.56.10+ renders vector without a Map ID); the
+        // Map ID still gates advanced markers and cloud styling.
+        googleMapsMapId?(): string;
+        // Synchronous getter injected by the host; the user's rendering choice
+        // as the Kotlin enum name: "AUTO" | "RASTER" | "VECTOR".
+        googleMapsRendering?(): string;
+        // Synchronous getter injected by the host; the map's light/dark
+        // context resolved by the host from the Map style setting and the app
+        // theme, as a google.maps.ColorScheme name: "LIGHT" | "DARK".
+        // Construction-time only, so a change rebuilds the page (see
+        // WebMapView's effectiveGoogleDark).
+        googleMapsColorScheme?(): string;
+    }
 }
 
 // Minimal type stubs for the Google Maps JS API (CDN-loaded at runtime,
 // never bundled). These cover only the surface this module exercises — kept
 // narrow and local on purpose, decoupled from the full weekly-channel
-// @types/google.maps global surface the loader package pulls in; the one
-// boundary cast sits at the importLibrary call.
+// @types/google.maps global surface the loader package pulls in; the
+// importLibrary call assigns the loader's typing to them, which type-checks
+// because the real library satisfies every stub.
 interface GMLatLng {
     lat: number;
     lng: number;
@@ -201,10 +204,6 @@ interface GMMapsLibrary {
     TrafficLayer: new () => GMTrafficLayer;
 }
 
-function gmBridge(): GoogleMapsFemtoBridge | undefined {
-    return window.femtoBridge as GoogleMapsFemtoBridge | undefined;
-}
-
 // Maps the GoogleMapType enum name strings from the Android bridge to the
 // Google Maps JS API map type id strings.
 const MAP_TYPE_IDS: Record<string, string> = {
@@ -255,14 +254,14 @@ function shownValue(requested: number, shown: number, sent: number | null): numb
 export async function init(reporter: PageReporter, pending: PendingBridgeCalls): Promise<void> {
     const { log, report } = reporter;
 
-    const key = gmBridge()?.googleMapsApiKey?.() ?? "";
+    const key = window.femtoBridge?.googleMapsApiKey?.() ?? "";
     if (!key) {
         log("google-maps-no-key");
         report("fatal", "google-maps-no-key");
         return;
     }
 
-    const mapId = gmBridge()?.googleMapsMapId?.() ?? "";
+    const mapId = window.femtoBridge?.googleMapsMapId?.() ?? "";
 
     // The user's explicit choice. AUTO passes no renderingType, leaving the Map
     // ID's cloud configuration in charge (and, with no Map ID, the API's own
@@ -270,12 +269,12 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // configuration. Vector is only ever a request: the API silently falls back
     // to raster on a device that cannot host it, which the tilesloaded handler
     // below detects. Requesting vector no longer needs a Map ID.
-    const rendering = gmBridge()?.googleMapsRendering?.() ?? "AUTO";
+    const rendering = window.femtoBridge?.googleMapsRendering?.() ?? "AUTO";
     // The OSM backend recolours its style per theme; Google's equivalent is
     // the colorScheme option, which the API only honours at construction. A
     // Map ID's cloud style takes over from it only if the user has associated
     // a dark-mode style with that Map ID in the Cloud console.
-    const colorScheme = gmBridge()?.googleMapsColorScheme?.() ?? "LIGHT";
+    const colorScheme = window.femtoBridge?.googleMapsColorScheme?.() ?? "LIGHT";
     // Only an EXPLICIT vector choice is a vector request. AUTO's outcome lives in
     // the Map ID's cloud configuration, which the page cannot read, so guessing
     // "Map ID means vector" would drive a raster-configured Map ID as vector —
@@ -362,7 +361,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
         // hidden then, and a layout or tilt change moves its spot with no
         // camera move, so the re-follow's placement sets the new spot before
         // its glide reads the map back. Centred until the first placement.
-        spot: { x: 0, y: 0 } as MarkerSpot,
+        spot: { x: 0, y: 0 },
         // Whether the chevron is on screen at [spot]: false while it is
         // hidden (detached) or not yet placed, when a new spot takes no glide
         // of its own (see spotMotion).
@@ -399,7 +398,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
         lensGen: 0,
         // The lens correction moveCam last sent: what lensFrom freezes when a
         // measurement arrives in the middle of a blend.
-        lensSent: { yawDeg: 0, x: 0, y: 0 } as LensEffect,
+        lensSent: { yawDeg: 0, x: 0, y: 0 },
         // The camera the lens was last measured at: the perspective only
         // changes with these, so a probe re-measures only when one moved.
         lensAt: { tilt: Number.NaN, zoom: Number.NaN, width: 0, height: 0 },
@@ -475,12 +474,13 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // as long as it lasts. Anything thrown after this point happens with the
     // script loaded and reaches the host as map-init-exception, which it
     // retries only within its budget: from `new mapsLib.Map` on, every reload
-    // is a billed map load. The cast narrows the loader's full google.maps
-    // typing to the local stubs above.
+    // is a billed map load. The annotation widens the loader's full
+    // google.maps typing to the local stubs above (a checked assignment, not
+    // a cast: the real library satisfies them).
     setOptions({ key, v: "weekly" });
-    const mapsLib = (await importLibrary("maps").catch((e: unknown) => {
+    const mapsLib: GMMapsLibrary = await importLibrary("maps").catch((e: unknown) => {
         throw new ScriptLoadError(e instanceof Error ? e.message : String(e));
-    })) as unknown as GMMapsLibrary;
+    });
 
     const mapEl = document.getElementById("map");
     if (!mapEl) {
@@ -549,7 +549,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // north-up surface the chevron placement and the centre math assume, and
     // keeps tilt_changed from ever firing there (the gesture detacher below
     // would read a flip as a user gesture).
-    const liveMap = new mapsLib.Map(mapEl as HTMLElement, {
+    const liveMap = new mapsLib.Map(mapEl, {
         center: { lat: 0, lng: 0 },
         zoom: 1,
         mapTypeId: "roadmap",
@@ -1320,7 +1320,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     window.setFollow = (follow) => (follow ? setFollowing(true) : userTookCamera());
 
     window.setNorthUp = (enabled) => {
-        state.northUp = !!enabled;
+        state.northUp = enabled;
         // Raster maps are north-up only and cannot rotate, so this is a no-op
         // for the map there; the chevron always shows the bearing regardless.
         if (!state.isVector) return;

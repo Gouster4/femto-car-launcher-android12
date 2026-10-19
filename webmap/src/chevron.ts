@@ -15,7 +15,8 @@ export interface ChevronHandles {
 export function chevronHandles(): ChevronHandles {
     // #self-marker is committed in index.html; a missing node is a build
     // error, not a runtime state.
-    const el = document.getElementById("self-marker") as HTMLElement;
+    const el = document.getElementById("self-marker");
+    if (el === null) throw new Error("#self-marker is missing from index.html");
     return { el, path: el.querySelector("path") };
 }
 
@@ -38,9 +39,16 @@ export function setChevronColor(chevron: ChevronHandles, color: string): void {
 // The chevron's inline style properties the follow machines write.
 export type ChevronStyleProperty = "left" | "top" | "transform" | "display" | "transition";
 
+// What the style writers below need of an element: those inline style
+// properties and nothing else, so the reflow-transition tests can drive them
+// with a plain object.
+export interface ChevronStyleTarget {
+    style: Pick<CSSStyleDeclaration, ChevronStyleProperty>;
+}
+
 // The value last written to each of them, per element.
 const writtenChevronStyles = new WeakMap<
-    HTMLElement,
+    ChevronStyleTarget,
     Partial<Record<ChevronStyleProperty, string>>
 >();
 
@@ -51,7 +59,7 @@ const writtenChevronStyles = new WeakMap<
 // since the browser may serialise a written value differently; so every
 // write of these properties on the chevron goes through here.
 export function setChevronStyle(
-    el: HTMLElement,
+    el: ChevronStyleTarget,
     property: ChevronStyleProperty,
     value: string,
 ): void {
@@ -67,7 +75,7 @@ export function setChevronStyle(
 // tilted ground plane (the GL backends and the Google vector map — a raster
 // map has no tilt plane).
 export function setChevronTransform(
-    el: HTMLElement,
+    el: ChevronStyleTarget,
     tiltDeg: number,
     turnDeg: number,
     perspective: boolean,
@@ -86,7 +94,10 @@ export function setChevronTransform(
 // strings. The screen-pinning rules live on the #self-marker id; the clone
 // keeps only the shared .self-marker class (placement is the map library's).
 export function geoMarkerElement(chevron: ChevronHandles): HTMLElement {
-    const el = chevron.el.cloneNode(true) as HTMLElement;
+    const el = chevron.el.cloneNode(true);
+    // cloneNode is declared to return a Node; a deep clone of an HTMLElement
+    // always is one, and the check lets the compiler see that.
+    if (!(el instanceof HTMLElement)) throw new Error("the chevron clone is not an HTMLElement");
     // Strip the id: only one #self-marker may exist in the document.
     el.removeAttribute("id");
     el.style.width = "36px";

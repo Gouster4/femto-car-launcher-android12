@@ -11,7 +11,7 @@ The launcher is designed for **multi-region distribution**. No single market is 
 
 ## Tech stack <a id="tech-stack"></a>
 
-- Kotlin (auto-applied by AGP, the Android Gradle Plugin), Jetpack Compose (via the BOM, Bill of Materials), Material 3; JDK 21 toolchain, Java 11 source/target. Versions: `gradle/libs.versions.toml` + `gradle/wrapper/gradle-wrapper.properties` (the JDK toolchain version itself is pinned in `gradle/gradle-daemon-jvm.properties`).
+- Kotlin (auto-applied by AGP, the Android Gradle Plugin), Jetpack Compose (via the BOM, Bill of Materials), Material 3; JDK 25 toolchain, Java 11 source/target. Versions: `gradle/libs.versions.toml` + `gradle/wrapper/gradle-wrapper.properties` (the JDK toolchain version itself is pinned in `gradle/gradle-daemon-jvm.properties`).
 - `minSdk = 33`, `targetSdk = 36` with `compileSdk { release(37) }` (compile against API 37 as `androidx.core` 1.19+ requires; the supported-device floor stays Android 13 / API 33).
 - Web map page (`webmap/`): TypeScript (native TS 7 compiler) + Vite+ (the `vp` CLI: build / test / oxlint / oxfmt) + `maplibre-gl`, managed with pnpm (pinned via `packageManager`). The Vite `build.target` is `chrome101` — the AOSP WebView the initial Android 13 release shipped (later 13 point releases carry 109, and a head unit in the field runs 101); aftermarket AI boxes build on that branch with the AOSP `com.android.webview` package, which the Play Store does not update, so never raise it without revisiting that floor (phone WebViews stay current, but the strictest device class governs). Rules: `.claude/rules/webmap.md`.
 - Project website (`docs/`): Astro 7 + MDX, Tailwind CSS v4 + shadcn/ui (Base UI) with two React islands (site header, screenshot catalog), Open Sans self-hosted via the Astro Fonts API; published to GitHub Pages by `.github/workflows/docs.yml`; pnpm-managed like the web map. Rules: `.claude/rules/docs.md`.
@@ -111,7 +111,7 @@ Every agent must read the matching rule file **before** editing files in its sco
 | `.claude/rules/compose.md` | `app/src/main/java/io/github/seijikohara/femto/**/*.kt` | UDF (unidirectional data flow) architecture, layering, `WhileUiSubscribed`, Compose performance |
 | `.claude/rules/testing.md` | `app/src/test/**`, `app/src/androidTest/**` | JUnit 4 + `runTest`, Compose UI tests, `testfixtures/` |
 | `.claude/rules/webmap.md` | `webmap/**` | Vite+ toolchain split, `build.target` floor, TS 7 constraints, pnpm pin |
-| `.claude/rules/docs.md` | `docs/**` | Astro site: content SSOT, base-aware links, pnpm / oxlint / Prettier toolchain, catalog import contract |
+| `.claude/rules/docs.md` | `docs/**` | Astro site: content SSOT, base-aware links, pnpm / oxlint / oxfmt toolchain, catalog import contract |
 
 ## Build & verify
 
@@ -126,7 +126,7 @@ Every agent must read the matching rule file **before** editing files in its sco
 | `./gradlew spotlessApply` | Auto-fix format violations in place |
 | `./gradlew versionCatalogUpdate` | Update `gradle/libs.versions.toml` to the latest stable versions (`nl.littlerobots.version-catalog-update`) |
 | `./gradlew :app:generateCatalog [-Pfemto.catalog.filter=<regex>]` | Render the dashboard screenshot catalog (960 images + `manifest.json`) into `app/build/outputs/catalog/` for the docs site; excluded from `test` |
-| `pnpm --dir docs run check` | Docs site: `astro check`, `tsc`, Prettier, oxlint, Vitest |
+| `pnpm --dir docs run check` | Docs site: `astro check`, `tsc`, oxfmt, oxlint, Vitest |
 | `pnpm --dir docs run build` | Docs site: static build + dist link check (`docs/dist/`) |
 
 Verify before claiming success: run the pipeline in [`.claude/skills/verify-android-build/SKILL.md`](.claude/skills/verify-android-build/SKILL.md) (spotlessCheck → assembleStableDebug → lint → test — the canonical verification procedure) for non-trivial changes. For UI changes, follow it with [`.claude/skills/verify-on-emulator/SKILL.md`](.claude/skills/verify-on-emulator/SKILL.md) to check the result on the TBox-Mock-Play AVD (definition committed in the skill directory; `create-avd.sh` recreates it).

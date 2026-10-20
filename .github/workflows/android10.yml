@@ -164,7 +164,12 @@ jobs:
           fi
 
           echo "SUCCESS: APK minimum SDK is 29"
-
+          
+      - name: Diagnose workflow file changes
+        run: |
+          git diff --name-status origin/android12 HEAD -- .github/workflows/
+          git diff origin/android12 HEAD -- .github/workflows/ci.yml
+          
       # 11. Push synced source branch
       - name: Push synced branch
         run: git push origin HEAD:android12

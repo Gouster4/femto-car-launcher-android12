@@ -41,6 +41,16 @@ jobs:
         run: |
           git fetch upstream develop
           git merge --no-edit -X theirs upstream/develop
+          
+      - name: Restore fork workflow files
+        run: |
+          git fetch origin android12
+          git checkout origin/android12 -- .github/workflows/
+          git add .github/workflows/
+          if ! git diff --cached --quiet; then
+            git commit -m "Preserve fork GitHub Actions workflows"
+          fi
+
 
       # 4. Enforce minimum SDK 29
       - name: Enforce minimum SDK 29

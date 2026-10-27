@@ -1,6 +1,7 @@
 package io.github.seijikohara.femto.ui.home.components
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -60,12 +61,7 @@ class CalendarCardTest {
         }
         // Today stays in the agenda even with no events, carrying an explicit
         // no-events line instead of silently vanishing.
-        val noEvents =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext
-                .getString(R.string.calendar_no_events)
-        rule.onNodeWithText(noEvents).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.calendar_no_events)).assertIsDisplayed()
     }
 
     @Test
@@ -94,7 +90,7 @@ class CalendarCardTest {
                 )
             }
         }
-        rule.onNodeWithContentDescription("Open full-screen calendar").performClick()
+        rule.onNodeWithContentDescription(string(R.string.calendar_expand)).performClick()
         assertTrue(expanded)
     }
 
@@ -124,14 +120,7 @@ class CalendarCardTest {
                 CalendarCard(snapshot = fakeCalendarSnapshot(hasCalendarAccess = false), is24Hour = true, onExpand = {})
             }
         }
-        // Resolve the copy from resources so the literal stays the SSOT in
-        // strings.xml ("Calendar access not granted").
-        val denied =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext
-                .getString(R.string.calendar_permission_denied)
-        rule.onNodeWithText(denied).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.calendar_permission_denied)).assertIsDisplayed()
     }
 
     @Test
@@ -141,13 +130,82 @@ class CalendarCardTest {
                 CalendarCard(snapshot = fakeCalendarSnapshot(queryFailed = true), is24Hour = true, onExpand = {})
             }
         }
-        // Resolve the copy from resources so the literal stays the SSOT in
-        // strings.xml ("Calendar couldn't be read").
-        val failed =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext
-                .getString(R.string.calendar_query_failed)
-        rule.onNodeWithText(failed).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.calendar_query_failed)).assertIsDisplayed()
     }
+
+    @Test
+    fun date_only_shows_the_head_without_the_agenda() {
+        rule.setContent {
+            FemtoTheme {
+                CalendarCard(snapshot = fakeCalendarSnapshot(), is24Hour = true, onExpand = {}, dateOnly = true)
+            }
+        }
+        // The head's month line renders; no event row does.
+        rule.onNodeWithText(headMonth).assertIsDisplayed()
+        rule.onNodeWithText("Team standup").assertDoesNotExist()
+        rule.onNodeWithText("Brunch").assertDoesNotExist()
+    }
+
+    @Test
+    fun date_only_card_tap_invokes_onExpand() {
+        var expanded = false
+        rule.setContent {
+            FemtoTheme {
+                CalendarCard(
+                    snapshot = fakeCalendarSnapshot(),
+                    is24Hour = true,
+                    onExpand = { expanded = true },
+                    dateOnly = true,
+                )
+            }
+        }
+        rule.onNodeWithContentDescription(string(R.string.calendar_expand)).performClick()
+        assertTrue(expanded)
+    }
+
+    @Test
+    fun date_only_shows_the_date_without_calendar_access_and_no_tap() {
+        rule.setContent {
+            FemtoTheme {
+                CalendarCard(
+                    snapshot = fakeCalendarSnapshot(hasCalendarAccess = false),
+                    is24Hour = true,
+                    onExpand = {},
+                    dateOnly = true,
+                )
+            }
+        }
+        // The date needs no calendar access, so it shows with no denial hint, and
+        // the card carries no click action: the panel cannot open without access.
+        rule.onNodeWithText(headMonth).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.calendar_permission_denied)).assertDoesNotExist()
+        rule.onNode(hasClickAction()).assertDoesNotExist()
+    }
+
+    @Test
+    fun date_only_shows_the_date_after_a_query_failure_and_no_tap() {
+        rule.setContent {
+            FemtoTheme {
+                CalendarCard(
+                    snapshot = fakeCalendarSnapshot(queryFailed = true),
+                    is24Hour = true,
+                    onExpand = {},
+                    dateOnly = true,
+                )
+            }
+        }
+        rule.onNodeWithText(headMonth).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.calendar_query_failed)).assertDoesNotExist()
+        rule.onNode(hasClickAction()).assertDoesNotExist()
+    }
+
+    // Copy resolves from resources, so strings.xml stays the SSOT for it.
+    private fun string(id: Int): String =
+        InstrumentationRegistry
+            .getInstrumentation()
+            .targetContext
+            .getString(id)
+
+    // The head's month line: the fixture's label, uppercased as the head draws it.
+    private val headMonth = fakeCalendarSnapshot().monthLabel.uppercase()
 }

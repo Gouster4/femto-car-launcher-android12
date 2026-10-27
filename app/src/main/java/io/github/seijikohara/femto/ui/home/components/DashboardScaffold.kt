@@ -36,8 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
@@ -48,6 +50,8 @@ import io.github.seijikohara.femto.data.display.DockWidth
 import io.github.seijikohara.femto.data.display.DriverSide
 import io.github.seijikohara.femto.data.display.MotionTier
 import io.github.seijikohara.femto.data.music.MusicCardState
+import io.github.seijikohara.femto.data.places.PlaceTarget
+import io.github.seijikohara.femto.ui.destination.DestinationPanelHost
 import io.github.seijikohara.femto.ui.drawer.AppDrawerPanelHost
 import io.github.seijikohara.femto.ui.home.HomeAction
 import io.github.seijikohara.femto.ui.home.HomeUiState
@@ -57,6 +61,8 @@ import io.github.seijikohara.femto.ui.theme.FemtoDimens
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.Motion
 import io.github.seijikohara.femto.ui.theme.PreviewLightDark
+import io.github.seijikohara.femto.ui.video.VideoAction
+import io.github.seijikohara.femto.ui.video.VideoUiState
 import kotlinx.coroutines.flow.StateFlow
 import java.time.Clock
 
@@ -173,6 +179,7 @@ internal fun DashboardScaffold(
     dockConfig: DockConfig = DockConfig(),
     driverSide: DriverSide = DriverSide.RIGHT,
     spectrum: StateFlow<FloatArray?>? = null,
+    calendarDateOnly: Boolean = false,
     musicShowAlbum: Boolean = true,
     musicShowArt: Boolean = true,
     motionTier: MotionTier = MotionTier.STANDARD,
@@ -181,6 +188,17 @@ internal fun DashboardScaffold(
     // pass a still capture that also needs the MapConfig placement inputs, to
     // draw the self-marker where the WebView would (see MapPanel.mapSurface).
     mapSurface: (@Composable (Location, MapConfig) -> Unit)? = null,
+    // The live map's connectivity reading (HomeViewModel.online), forwarded to
+    // MapPanel.
+    online: Boolean = true,
+    // The video window (issue #390): its state, its events, and the player's
+    // surface. Off by default, so every caller that does not show it lays out
+    // as before.
+    video: VideoUiState = VideoUiState.Off,
+    // The motion gate's verdict for the video picture (VideoViewModel.pictureVisible).
+    videoPictureVisible: Boolean = false,
+    onVideoAction: (VideoAction) -> Unit = {},
+    videoSurface: @Composable (Modifier) -> Unit = {},
 ) = DashboardContent(
     uiState = uiState,
     is24Hour = is24Hour,
@@ -200,11 +218,17 @@ internal fun DashboardScaffold(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.systemBars),
     spectrum = spectrum,
+    calendarDateOnly = calendarDateOnly,
     musicShowAlbum = musicShowAlbum,
     musicShowArt = musicShowArt,
     motionTier = motionTier,
     clock = clock,
     mapSurface = mapSurface,
+    online = online,
+    video = video,
+    videoPictureVisible = videoPictureVisible,
+    onVideoAction = onVideoAction,
+    videoSurface = videoSurface,
 )
 
 // The full-screen dashboard body: the map fills the viewport as the background
@@ -228,6 +252,7 @@ private fun DashboardContent(
     modifier: Modifier = Modifier,
     dockConfig: DockConfig = DockConfig(),
     spectrum: StateFlow<FloatArray?>? = null,
+    calendarDateOnly: Boolean = false,
     musicShowAlbum: Boolean = true,
     musicShowArt: Boolean = true,
     motionTier: MotionTier = MotionTier.STANDARD,
@@ -236,6 +261,11 @@ private fun DashboardContent(
     // pass a still capture that also needs the MapConfig placement inputs, to
     // draw the self-marker where the WebView would (see MapPanel.mapSurface).
     mapSurface: (@Composable (Location, MapConfig) -> Unit)? = null,
+    online: Boolean = true,
+    video: VideoUiState = VideoUiState.Off,
+    videoPictureVisible: Boolean = false,
+    onVideoAction: (VideoAction) -> Unit = {},
+    videoSurface: @Composable (Modifier) -> Unit = {},
 ) = BoxWithConstraints(modifier = modifier) {
     val compact = maxHeight < CompactHeightBreakpoint || maxWidth < CompactWidthBreakpoint
     val portrait = maxHeight > maxWidth
@@ -259,8 +289,9 @@ private fun DashboardContent(
     )
 
     // Shared Haze state: the map registers as the blur source, every glass overlay
-    // (chrome, the floating cards, and the dock) samples it. The WebView GL surface
-    // falls back to the tint (it cannot be captured by Haze).
+    // (chrome, the floating cards, and the dock) samples it. Each overlay redraws the
+    // source, so the live map WebView draws through its own hardware layer (see
+    // WebMapView) rather than once per overlay.
     val hazeState = rememberHazeState()
     var following by remember { mutableStateOf(true) }
     var bearingDeg by remember { mutableFloatStateOf(0f) }
@@ -271,15 +302,17 @@ private fun DashboardContent(
     // overlay tree, so one dismiss definition can drive catchers on both sides
     // of the dock inset: the inner catcher (inside DashboardOverlays) covers
     // the overlay box, the outer catcher below covers the dock-margin slivers
-    // outside it. The apps panel's trigger is the dock's APPS button — a
-    // sibling of the overlays — so its OpenAppDrawer action is intercepted
-    // here rather than routed to the ViewModel. rememberSaveable keeps an open
-    // panel open across rotation.
+    // outside it. The apps and destination panels' triggers are dock buttons
+    // (APPS, NAVIGATION) — siblings of the overlays — so their OpenAppDrawer /
+    // OpenDestinations actions are intercepted here rather than routed to the
+    // ViewModel. rememberSaveable keeps an open panel open across rotation.
     var appsExpanded by rememberSaveable { mutableStateOf(false) }
+    var destinationExpanded by rememberSaveable { mutableStateOf(false) }
     var nowPlayingExpanded by rememberSaveable { mutableStateOf(false) }
     var calendarExpanded by rememberSaveable { mutableStateOf(false) }
     var weatherExpanded by rememberSaveable { mutableStateOf(false) }
     var tripExpanded by rememberSaveable { mutableStateOf(false) }
+    var videoExpanded by rememberSaveable { mutableStateOf(false) }
     // Auto-collapse when a panel's backing data disappears (session ended,
     // permission revoked mid-session, cold cache) so a dead panel never strands
     // over the map. The trip panel needs no gate: its ViewModel always has
@@ -289,7 +322,7 @@ private fun DashboardContent(
     LaunchedEffect(hasNowPlaying) {
         if (!hasNowPlaying) nowPlayingExpanded = false
     }
-    val hasCalendar = uiState.calendar?.takeIf { it.hasCalendarAccess && !it.queryFailed } != null
+    val hasCalendar = uiState.calendar?.hasAgenda == true
     LaunchedEffect(hasCalendar) {
         if (!hasCalendar) calendarExpanded = false
     }
@@ -297,15 +330,33 @@ private fun DashboardContent(
     LaunchedEffect(hasWeather) {
         if (!hasWeather) weatherExpanded = false
     }
-    // The apps panel is the only one reachable while another panel is open —
-    // the dock stays operable — so opening it collapses whatever is underneath,
-    // mirroring how the old drawer sheet covered everything.
+    // The video panel stands in for the window, so it goes when the window
+    // does (turned off in Settings, or closed).
+    LaunchedEffect(video.windowEnabled) {
+        if (!video.windowEnabled) videoExpanded = false
+    }
+    // The dock-opened panels (apps, destination) are the only ones reachable
+    // while another panel is open — the dock stays operable — so opening one
+    // collapses whatever is underneath, mirroring how the old drawer sheet
+    // covered everything.
     LaunchedEffect(appsExpanded) {
         if (appsExpanded) {
             nowPlayingExpanded = false
             calendarExpanded = false
             weatherExpanded = false
             tripExpanded = false
+            videoExpanded = false
+            destinationExpanded = false
+        }
+    }
+    LaunchedEffect(destinationExpanded) {
+        if (destinationExpanded) {
+            nowPlayingExpanded = false
+            calendarExpanded = false
+            weatherExpanded = false
+            tripExpanded = false
+            videoExpanded = false
+            appsExpanded = false
         }
     }
     // A tap outside an open panel's body dismisses it, matching the modal
@@ -316,13 +367,19 @@ private fun DashboardContent(
             calendarExpanded -> ({ calendarExpanded = false })
             weatherExpanded -> ({ weatherExpanded = false })
             tripExpanded -> ({ tripExpanded = false })
+            videoExpanded -> ({ videoExpanded = false })
             appsExpanded -> ({ appsExpanded = false })
+            destinationExpanded -> ({ destinationExpanded = false })
             else -> null
         }
     val overlayAction =
         remember(onAction) {
             { action: HomeAction ->
-                if (action is HomeAction.OpenAppDrawer) appsExpanded = true else onAction(action)
+                when (action) {
+                    HomeAction.OpenAppDrawer -> appsExpanded = true
+                    HomeAction.OpenDestinations -> destinationExpanded = true
+                    else -> onAction(action)
+                }
             }
         }
 
@@ -377,13 +434,26 @@ private fun DashboardContent(
         } else {
             0.dp
         }
+    // The height the portrait band actually takes. bottomCardBand except when the
+    // date-only calendar wraps its head (calendarWrapsHead): the band then ends
+    // where its cards do, below the cap, so the speed overlay and the marker
+    // reserve follow the band's measured height down. Until the first measure
+    // (and after the mode turns over, which resets it) the cap stands in.
+    val bandWrapsCards = bottomCards && calendarWrapsHead(panels, calendarDateOnly)
+    var wrappedBandHeightPx by remember(bandWrapsCards) { mutableIntStateOf(0) }
+    val bottomCardExtent =
+        if (bandWrapsCards && wrappedBandHeightPx > 0) {
+            with(density) { wrappedBandHeightPx.toDp() }
+        } else {
+            bottomCardBand
+        }
     val bottomSafeFraction =
         with(density) {
             val heightPx = maxHeight.roundToPx()
             if (heightPx > 0) {
                 val dockBottom = if (dockPosition == DockPosition.BOTTOM) dockExtent else 0.dp
                 val overlay = overlayHeightPx + (cardGap + MarkerOverlayClearance + dockBottom).toPx()
-                val cards = bottomCardBand.toPx()
+                val cards = bottomCardExtent.toPx()
                 ((overlay + cards) / heightPx).coerceIn(0f, 0.5f)
             } else {
                 0f
@@ -411,7 +481,7 @@ private fun DashboardContent(
         onTap = { onAction(HomeAction.OpenMaps) },
         modifier = Modifier.fillMaxSize().hazeSource(hazeState),
         recenterNonce = recenterNonce,
-        online = uiState.online,
+        online = online,
         onFollowChange = { following = it },
         onBearingChange = { bearingDeg = it },
         onOpenLicenses = { onAction(HomeAction.OpenLicenses) },
@@ -450,6 +520,8 @@ private fun DashboardContent(
         landscapeCards = landscapeCards,
         bottomCards = bottomCards,
         bottomCardBand = bottomCardBand,
+        bottomCardExtent = bottomCardExtent,
+        onWrappedBandHeightChange = { wrappedBandHeightPx = it },
         floatingCardWidth = floatingCardWidth,
         hasCards = hasCards,
         hazeState = hazeState,
@@ -477,11 +549,21 @@ private fun DashboardContent(
         tripExpanded = tripExpanded,
         onExpandTrip = { tripExpanded = true },
         onCloseTrip = { tripExpanded = false },
+        video = video,
+        videoPictureVisible = videoPictureVisible,
+        onVideoAction = onVideoAction,
+        videoSurface = videoSurface,
+        videoExpanded = videoExpanded,
+        onExpandVideo = { videoExpanded = true },
+        onCloseVideo = { videoExpanded = false },
         appsExpanded = appsExpanded,
         onCloseApps = { appsExpanded = false },
+        destinationExpanded = destinationExpanded,
+        onCloseDestination = { destinationExpanded = false },
         dismissOpenPanel = dismissOpenPanel,
         modifier = Modifier.fillMaxSize().padding(dockEdgePadding(dockPosition, dockExtent)),
         spectrum = spectrum,
+        calendarDateOnly = calendarDateOnly,
         musicShowAlbum = musicShowAlbum,
         musicShowArt = musicShowArt,
         clock = clock,
@@ -522,7 +604,7 @@ private fun DashboardContent(
 }
 
 // The dashboard's glass overlay tree that floats over the map — map controls, the
-// clock and speed overlays, the floating info cards, and the five maximize
+// clock and speed overlays, the floating info cards, and the six maximize
 // panels. The caller keeps the map (the blur source), the dock, and every
 // panel's expanded state composed one level up, outside this tree, and supplies
 // the dock-edge inset through [modifier] so the overlays never sit under the
@@ -540,7 +622,12 @@ private fun DashboardOverlays(
     cardGap: Dp,
     landscapeCards: Boolean,
     bottomCards: Boolean,
+    // The portrait band's cap, and the height it actually takes (see
+    // DashboardContent), which the band reports back through
+    // onWrappedBandHeightChange while it wraps its cards.
     bottomCardBand: Dp,
+    bottomCardExtent: Dp,
+    onWrappedBandHeightChange: (Int) -> Unit,
     floatingCardWidth: Dp,
     hasCards: Boolean,
     hazeState: HazeState,
@@ -572,12 +659,22 @@ private fun DashboardOverlays(
     tripExpanded: Boolean,
     onExpandTrip: () -> Unit,
     onCloseTrip: () -> Unit,
+    video: VideoUiState,
+    videoPictureVisible: Boolean,
+    onVideoAction: (VideoAction) -> Unit,
+    videoSurface: @Composable (Modifier) -> Unit,
+    videoExpanded: Boolean,
+    onExpandVideo: () -> Unit,
+    onCloseVideo: () -> Unit,
     appsExpanded: Boolean,
     onCloseApps: () -> Unit,
+    destinationExpanded: Boolean,
+    onCloseDestination: () -> Unit,
     // Non-null while any panel is open: the inner outside-tap catcher's action.
     dismissOpenPanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
     spectrum: StateFlow<FloatArray?>? = null,
+    calendarDateOnly: Boolean = false,
     musicShowAlbum: Boolean = true,
     musicShowArt: Boolean = true,
     clock: Clock = Clock.systemDefaultZone(),
@@ -592,7 +689,7 @@ private fun DashboardOverlays(
     LaunchedEffect(expandedNowPlaying) {
         if (expandedNowPlaying != null) panelNowPlaying = expandedNowPlaying
     }
-    val expandedCalendar = uiState.calendar?.takeIf { it.hasCalendarAccess && !it.queryFailed }
+    val expandedCalendar = uiState.calendar?.takeIf { it.hasAgenda }
     var panelCalendar by remember { mutableStateOf(expandedCalendar) }
     LaunchedEffect(expandedCalendar) {
         if (expandedCalendar != null) panelCalendar = expandedCalendar
@@ -602,13 +699,23 @@ private fun DashboardOverlays(
     LaunchedEffect(expandedWeather) {
         if (expandedWeather != null) panelWeather = expandedWeather
     }
+    // The video panel's last state while the window was on: closing turns the
+    // window off and empties the file in one step, and the exit fade would
+    // otherwise show "Pick a video" in the panel the user just closed.
+    var panelVideo by remember { mutableStateOf(video) }
+    LaunchedEffect(video) {
+        if (video.windowEnabled) panelVideo = video
+    }
 
     // LEFT driver side mirrors the dashboard start <-> end: the cards, clock, and speed
     // reserve move to the left; the map controls (opposite the cards) move to the
     // right. Each site below reduces to its current RIGHT expression when !mirror.
     val mirror = driverSide == DriverSide.LEFT
+    // The clock's measured size: the video window sits beside it when the top
+    // row has room, and below it otherwise (videoWindowPlacement).
+    var clockSize by remember { mutableStateOf(IntSize.Zero) }
 
-    Box(modifier = modifier) {
+    BoxWithConstraints(modifier = modifier) {
         // Map controls render only when the map does (a fix exists). The compass pins
         // to the top corner opposite the cards; the control column to the mid edge
         // opposite the cards — both flip with the driver side.
@@ -618,7 +725,11 @@ private fun DashboardOverlays(
                 onTap = { onAction(HomeAction.ToggleMapNorthUp) },
                 hazeState = hazeState,
                 glassConfig = glassConfig,
-                modifier = Modifier.align(if (mirror) Alignment.TopEnd else Alignment.TopStart).padding(outerPad),
+                modifier =
+                    Modifier
+                        .align(if (mirror) Alignment.TopEnd else Alignment.TopStart)
+                        .padding(outerPad)
+                        .testTag(DashboardTags.COMPASS),
             )
             MapControlColumn(
                 showLocate = true,
@@ -631,7 +742,8 @@ private fun DashboardOverlays(
                 modifier =
                     Modifier
                         .align(if (mirror) Alignment.CenterEnd else Alignment.CenterStart)
-                        .padding(if (mirror) PaddingValues(end = outerPad) else PaddingValues(start = outerPad)),
+                        .padding(if (mirror) PaddingValues(end = outerPad) else PaddingValues(start = outerPad))
+                        .testTag(DashboardTags.MAP_CONTROLS),
             )
         }
 
@@ -661,7 +773,8 @@ private fun DashboardOverlays(
                             horizontal = if (landscapeCards) floatingCardWidth + cardGap else outerPad,
                             top = outerPad,
                         ),
-                    ),
+                    ).onSizeChanged { clockSize = it }
+                    .testTag(DashboardTags.CLOCK),
         )
 
         // Speed overlay centred in the exposed map area above the dock, held clear of
@@ -682,7 +795,7 @@ private fun DashboardOverlays(
                             PaddingValues(
                                 start = outerPad,
                                 end = outerPad,
-                                bottom = cardGap + bottomCardBand,
+                                bottom = cardGap + bottomCardExtent,
                             )
                         } else {
                             cardSideInset(
@@ -709,7 +822,10 @@ private fun DashboardOverlays(
                 glassConfig = glassConfig,
                 motionTier = motionTier,
                 onExpand = onExpandTrip,
-                modifier = Modifier.onSizeChanged { onOverlayHeightChange(it.height) },
+                modifier =
+                    Modifier
+                        .onSizeChanged { onOverlayHeightChange(it.height) }
+                        .testTag(DashboardTags.SPEED),
             )
         }
 
@@ -731,22 +847,34 @@ private fun DashboardOverlays(
                 onExpandCalendar = onExpandCalendar,
                 onExpandWeather = onExpandWeather,
                 spectrum = spectrum,
+                calendarDateOnly = calendarDateOnly,
                 musicShowAlbum = musicShowAlbum,
                 musicShowArt = musicShowArt,
                 motionTier = motionTier,
                 modifier =
                     if (bottomCards) {
                         Modifier
+                            .testTag(DashboardTags.CARDS)
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .height(bottomCardBand)
-                            .padding(horizontal = outerPad, vertical = outerPad)
+                            .then(
+                                if (calendarWrapsHead(panels, calendarDateOnly)) {
+                                    // The band wraps its cards (bottom-aligned, up to
+                                    // the cap) and reports the height it takes.
+                                    Modifier
+                                        .heightIn(max = bottomCardBand)
+                                        .onSizeChanged { onWrappedBandHeightChange(it.height) }
+                                } else {
+                                    Modifier.height(bottomCardBand)
+                                },
+                            ).padding(horizontal = outerPad, vertical = outerPad)
                     } else {
                         // Cards in a column on the driver's side, top-anchored and
                         // height-capped so they pair with the clock and never stretch;
                         // the map keeps the opposite side. Mirrors to the start edge on
                         // a LEFT driver side.
                         Modifier
+                            .testTag(DashboardTags.CARDS)
                             .align(if (mirror) Alignment.TopStart else Alignment.TopEnd)
                             .width(floatingCardWidth)
                             .heightIn(max = CardClusterMaxHeight)
@@ -760,6 +888,45 @@ private fun DashboardOverlays(
                                 ),
                             )
                     },
+            )
+        }
+
+        // The video window: on the map, on the side opposite the cards, beside
+        // the compass and control column (which own the outer edge), at the
+        // top. The open panel stands in for it, so one surface at a time
+        // draws the picture.
+        if (video.windowEnabled && !videoExpanded) {
+            val placement =
+                with(LocalDensity.current) {
+                    videoWindowPlacement(
+                        overlayWidth = maxWidth,
+                        mapAreaWidth = if (landscapeCards) maxWidth - floatingCardWidth else maxWidth,
+                        outerPad = outerPad,
+                        gap = cardGap,
+                        clockInset = if (landscapeCards) floatingCardWidth + cardGap else outerPad,
+                        clockWidth = clockSize.width.toDp(),
+                        clockHeight = clockSize.height.toDp(),
+                    )
+                }
+            VideoWindow(
+                state = video,
+                pictureVisible = videoPictureVisible,
+                onAction = onVideoAction,
+                onExpand = onExpandVideo,
+                surface = videoSurface,
+                hazeState = hazeState,
+                glassConfig = glassConfig,
+                modifier =
+                    Modifier
+                        .align(if (mirror) Alignment.TopEnd else Alignment.TopStart)
+                        .padding(
+                            if (mirror) {
+                                PaddingValues(end = placement.start, top = placement.top)
+                            } else {
+                                PaddingValues(start = placement.start, top = placement.top)
+                            },
+                        ).width(placement.width)
+                        .testTag(DashboardTags.VIDEO_WINDOW),
             )
         }
 
@@ -882,6 +1049,24 @@ private fun DashboardOverlays(
             )
         }
 
+        AnimatedVisibility(
+            visible = videoExpanded && video.windowEnabled,
+            enter = Motion.panelEnter(motionTier),
+            exit = Motion.panelExit(motionTier),
+            modifier = Modifier.fillMaxSize().padding(outerPad),
+        ) {
+            VideoPanel(
+                state = if (video.windowEnabled) video else panelVideo,
+                pictureVisible = videoPictureVisible,
+                onAction = onVideoAction,
+                onCollapse = onCloseVideo,
+                surface = videoSurface,
+                hazeState = hazeState,
+                glassConfig = glassConfig,
+                modifier = Modifier.fillMaxSize().testTag(DashboardTags.VIDEO_PANEL),
+            )
+        }
+
         // The app launcher, opened by the dock's APPS button (see the parent's
         // OpenAppDrawer interception). Unlike the data-backed panels it needs no
         // "has data" gate: an empty app list renders its own "No apps" state.
@@ -893,6 +1078,28 @@ private fun DashboardOverlays(
         ) {
             AppDrawerPanelHost(
                 onClose = onCloseApps,
+                hazeState = hazeState,
+                glassConfig = glassConfig,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // The destination panel, opened by the dock's NAVIGATION button (see
+        // the parent's OpenDestinations interception). Like the apps panel it
+        // needs no "has data" gate: with no fix it still takes a query, and
+        // only "Save current location" waits for one.
+        AnimatedVisibility(
+            visible = destinationExpanded,
+            enter = Motion.panelEnter(motionTier),
+            exit = Motion.panelExit(motionTier),
+            modifier = Modifier.fillMaxSize().padding(outerPad),
+        ) {
+            DestinationPanelHost(
+                currentPoint = uiState.location?.let { PlaceTarget.Point(it.latitude, it.longitude) },
+                currentAddress = uiState.address?.displayString().orEmpty(),
+                onNavigate = { target, label -> onAction(HomeAction.Navigate(target, label)) },
+                onOpenMaps = { onAction(HomeAction.OpenMaps) },
+                onClose = onCloseDestination,
                 hazeState = hazeState,
                 glassConfig = glassConfig,
                 modifier = Modifier.fillMaxSize(),
@@ -917,6 +1124,61 @@ private fun cardSideInset(
     } else {
         PaddingValues(end = horizontal, top = top, bottom = bottom)
     }
+
+/**
+ * Test tags on the dashboard's overlays, so layout tests can check that the
+ * video window keeps clear of each of them.
+ */
+internal object DashboardTags {
+    const val COMPASS = "dashboard-compass"
+    const val MAP_CONTROLS = "dashboard-map-controls"
+    const val CLOCK = "dashboard-clock"
+    const val SPEED = "dashboard-speed"
+    const val CARDS = "dashboard-cards"
+    const val VIDEO_WINDOW = "dashboard-video-window"
+    const val VIDEO_PANEL = "dashboard-video-panel"
+}
+
+// Where the video window sits, as insets from the top corner on the side
+// opposite the cards, and how wide it is.
+private data class VideoWindowPlacement(
+    val start: Dp,
+    val top: Dp,
+    val width: Dp,
+)
+
+// The window clears the outer column the compass and the map control column
+// share, so neither is covered whatever the height. It is about a third of the
+// map area's width (16:9 sets the height), between a floor that keeps its
+// 16 sp line and 64 dp button legible and a ceiling that keeps it small on a
+// wide panel, and never wider than the map area leaves beside that column. It
+// sits in the top row when that row has room beside the clock, which sits in
+// the top corner on the card side; otherwise it drops below the clock, which
+// keeps it in the upper part of the map, clear of the speed readout at the
+// bottom and of the self-marker the map places below centre.
+private fun videoWindowPlacement(
+    overlayWidth: Dp,
+    mapAreaWidth: Dp,
+    outerPad: Dp,
+    gap: Dp,
+    clockInset: Dp,
+    clockWidth: Dp,
+    clockHeight: Dp,
+): VideoWindowPlacement {
+    val start = outerPad + maxOf(MapCompassSize, MapControlsStripWidth) + gap
+    val width =
+        (mapAreaWidth * VIDEO_WINDOW_WIDTH_FRACTION)
+            .coerceIn(VideoWindowMinWidth, VideoWindowMaxWidth)
+            .coerceAtMost(mapAreaWidth - start - outerPad)
+    val topRowRoom = overlayWidth - clockInset - clockWidth - gap - start
+    val top = if (width <= topRowRoom) outerPad else outerPad + maxOf(clockHeight, MapCompassSize) + gap
+    return VideoWindowPlacement(start = start, top = top, width = width)
+}
+
+// The video window's width as a share of the map area, and its bounds.
+private const val VIDEO_WINDOW_WIDTH_FRACTION = 1f / 3f
+private val VideoWindowMinWidth: Dp = 240.dp
+private val VideoWindowMaxWidth: Dp = 480.dp
 
 // Margins that float the dock off its free edges by [margin] (a vertical rail's
 // inner edge faces the dashboard, where the overlay inset already opens the gap).
@@ -955,6 +1217,15 @@ private fun dockAlignment(position: DockPosition): Alignment =
         DockPosition.RIGHT -> Alignment.CenterEnd
     }
 
+// Whether the date-only calendar card wraps its head instead of taking the
+// weighted calendar + weather row. Only without the weather card: beside it the
+// calendar keeps the row's height, as the agenda card does, so the pair still
+// reads as one row with both heads on the shared hero line.
+private fun calendarWrapsHead(
+    panels: PanelVisibility,
+    calendarDateOnly: Boolean,
+): Boolean = calendarDateOnly && panels.calendar && !panels.weather
+
 // The floating info cards: the calendar+weather row stacked over the music card,
 // hosted in the landscape right column or the portrait bottom band. Each card gets
 // the shared glass treatment so the map shows through.
@@ -976,6 +1247,7 @@ private fun FloatingCardColumn(
     motionTier: MotionTier,
     modifier: Modifier = Modifier,
     spectrum: StateFlow<FloatArray?>? = null,
+    calendarDateOnly: Boolean = false,
     musicShowAlbum: Boolean = true,
     musicShowArt: Boolean = true,
 ) {
@@ -988,6 +1260,7 @@ private fun FloatingCardColumn(
             glassConfig = glassConfig,
             motionTier = motionTier,
             modifier = cardModifier,
+            dateOnly = calendarDateOnly,
         )
     }
     val weather: @Composable (Modifier) -> Unit = { cardModifier ->
@@ -1029,7 +1302,11 @@ private fun FloatingCardColumn(
         // of stacking three full cards into a column too short for them; a single
         // visible card takes the whole row. The row is the only weighted child, so it
         // grows to fill whatever height the content-height music card below leaves.
-        if (panels.calendar || panels.weather) {
+        // The one exception is a lone date-only calendar: nothing in it needs the
+        // row's height, so it wraps its head and the map takes the rest.
+        if (calendarWrapsHead(panels, calendarDateOnly)) {
+            calendar(Modifier.fillMaxWidth())
+        } else if (panels.calendar || panels.weather) {
             Row(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(cardGap),
@@ -1210,6 +1487,52 @@ private fun DashboardScaffoldHiddenPanelPreview() {
             panels = PanelVisibility(calendar = false),
             glassConfig = GlassConfig(),
             onAction = {},
+        )
+    }
+}
+
+// Date-only calendar with the weather card hidden: the calendar wraps its head,
+// so the landscape column ends below the music card and the map takes the rest.
+// Unlike the previews above, these carry a calendar snapshot: without one the
+// date-only card is an empty frame and shows nothing of the mode.
+@PreviewLightDark
+@Preview(name = "Dashboard - date-only calendar", widthDp = 853, heightDp = 512)
+@Composable
+private fun DashboardScaffoldDateOnlyPreview() {
+    FemtoTheme {
+        DashboardScaffold(
+            uiState = HomeUiState.Initial.copy(calendar = PreviewCalendarSnapshot),
+            is24Hour = true,
+            showClockSeconds = true,
+            speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
+            temperatureUnit = TemperatureUnit.CELSIUS,
+            mapConfig = MapConfig(),
+            panels = PanelVisibility(weather = false),
+            glassConfig = GlassConfig(),
+            onAction = {},
+            calendarDateOnly = true,
+        )
+    }
+}
+
+// The same in portrait: the bottom band shrinks to its cards and the speed
+// overlay follows it down.
+@PreviewLightDark
+@Preview(name = "Dashboard - date-only calendar, portrait", widthDp = 360, heightDp = 640)
+@Composable
+private fun DashboardScaffoldDateOnlyPortraitPreview() {
+    FemtoTheme {
+        DashboardScaffold(
+            uiState = HomeUiState.Initial.copy(calendar = PreviewCalendarSnapshot),
+            is24Hour = true,
+            showClockSeconds = true,
+            speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
+            temperatureUnit = TemperatureUnit.CELSIUS,
+            mapConfig = MapConfig(),
+            panels = PanelVisibility(weather = false),
+            glassConfig = GlassConfig(),
+            onAction = {},
+            calendarDateOnly = true,
         )
     }
 }

@@ -62,7 +62,7 @@ These floors are the **safe default** (the `MEDIUM` UI scale), not a hard ceilin
 - `MainActivity`: categories `HOME` + `DEFAULT` + `LAUNCHER`, `launchMode="singleTask"`, `stateNotNeeded="true"`.
 - Orientation is **not** locked — landscape head units, portrait phone mounts, and everything between must all work.
 - On a smartphone the launcher also runs as a regular app via `LAUNCHER`; default HOME is optional there — a phone is a shared, daily-use device, never assume the app owns it.
-- Aftermarket AI boxes lock the default-launcher slot; the app launches via a host "boot-up app" hook (~30 s, outside our control). Cold start in-process is a key product metric — keep `MainActivity#onCreate` lean.
+- Aftermarket AI boxes lock the default-launcher slot; the app launches via a host "boot-up app" hook (~30 s, outside the app's control). Cold start in-process is a key product metric — keep `MainActivity#onCreate` lean.
 
 ### Motion-state policy <a id="driving-lockout"></a>
 
@@ -77,6 +77,7 @@ Every `<uses-permission>` follows the procedure in `.claude/rules/permissions.md
 - Write source code, comments, docstrings, Markdown, commit messages, and PR text in **English**.
 - Comments explain **why** when the why is non-obvious; never restate what the code already shows.
 - Markdown prose is not hard-wrapped: a paragraph or list item is one line, and a line break appears only where Markdown needs one (headings, list items, table rows, code blocks, block HTML/JSX, front matter). The same applies to issue, pull request, and review-comment bodies. Commit messages are not Markdown and keep git's conventional wrapping.
+- Text in the maintainer's voice — issue and pull request comments, pull request bodies, release text, README and the docs site — uses the first person singular ("I", "my"), never "we" or "our": the project has one maintainer. `CODE_OF_CONDUCT.md` keeps the Contributor Covenant's community "we".
 - No AI-attribution trailers or footers in commits, PRs, or issues (`Co-Authored-By: Claude`, "Generated with Claude Code", or any agent's equivalent).
 - Public-facing content (README, the docs site, release text) stays brand-neutral: no competitor or vendor product names. Platform standards (CarPlay, Android Auto) and the technical stack (MapLibre, OpenStreetMap, OpenFreeMap, MET Norway, Google Maps) may be named.
 - New screens use `@PreviewLightDark` for both light and dark modes.

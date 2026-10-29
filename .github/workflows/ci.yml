@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [android12-arm32]
   workflow_dispatch:
 
 # Cancel superseded PR runs; never cancel an in-flight main/develop publish.

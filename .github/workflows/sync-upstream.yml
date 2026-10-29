@@ -20,7 +20,7 @@ jobs:
       - name: Check out Android 12 branch
         uses: actions/checkout@v4
         with:
-          ref: android12
+          ref: android12-arm32
           fetch-depth: 0
 
       - name: Configure Git
@@ -30,7 +30,7 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream \
-            https://github.com/seijikohara/femto-car-launcher.git
+            https://github.com/gouster4/femto-car-launcher.git
 
       - name: Merge upstream develop
         run: |
@@ -163,4 +163,4 @@ jobs:
           retention-days: 14
 
       - name: Push synced branch
-        run: git push origin HEAD:android12
+        run: git push origin HEAD:android12-arm32

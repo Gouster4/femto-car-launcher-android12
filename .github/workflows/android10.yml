@@ -206,13 +206,13 @@ jobs:
           gh release create "$TAG" \
             "$APK" \
             --repo "$GITHUB_REPOSITORY" \
-            --target android12 \
+            --target android12-arm32 \
             --title "Android 10 APK - $TAG" \
             --notes "Automated Android 10 build.
 
           Minimum supported Android SDK: 29 (Android 10).
           Compile SDK: 37.
-          Source branch: android12.
+          Source branch: android12-arm32.
           Upstream: gouster4/femto-car-launcher develop.
 
           Built and verified by GitHub Actions."

@@ -34,7 +34,7 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream \
-            https://github.com/gouster4/femto-car-launcher.git
+            https://github.com/seijikohara/femto-car-launcher.git
 
       # 3. Merge upstream develop
       - name: Merge upstream develop

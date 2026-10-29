@@ -22,7 +22,7 @@ jobs:
       - name: Check out Android 12 branch
         uses: actions/checkout@v4
         with:
-          ref: android12
+          ref: android12-arm32
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -34,7 +34,7 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream \
-            https://github.com/seijikohara/femto-car-launcher.git
+            https://github.com/gouster4/femto-car-launcher.git
 
       # 3. Merge upstream develop
       - name: Merge upstream develop
@@ -167,7 +167,7 @@ jobs:
 
       # 11. Push synced source branch
       - name: Push synced branch
-        run: git push origin HEAD:android12
+        run: git push origin HEAD:android12-arm32
 
       # 12. Generate unique release tag
       - name: Generate release tag
@@ -191,13 +191,13 @@ jobs:
           gh release create "$TAG" \
             "$APK" \
             --repo "$GITHUB_REPOSITORY" \
-            --target android12 \
+            --target android12-arm32 \
             --title "Android 12 APK - $TAG" \
             --notes "Automated Android 12 build.
 
           Minimum supported Android SDK: 31 (Android 12).
           Compile SDK: 37.
-          Source branch: android12.
+          Source branch: android12-arm32.
           Upstream: seijikohara/femto-car-launcher develop.
 
           Built and verified by GitHub Actions."

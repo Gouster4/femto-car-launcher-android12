@@ -22,7 +22,7 @@ jobs:
       - name: Check out Android 12 branch
         uses: actions/checkout@v4
         with:
-          ref: android12
+          ref: android12-arm32
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -34,7 +34,7 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream \
-            https://github.com/seijikohara/femto-car-launcher.git
+            https://github.com/gouster4/femto-car-launcher.git
 
       # 3. Merge upstream develop
       - name: Merge upstream develop
@@ -44,8 +44,8 @@ jobs:
           
       - name: Restore fork workflow files
         run: |
-          git fetch origin android12
-          git checkout origin/android12 -- .github/workflows/
+          git fetch origin android12-arm32
+          git checkout origin/android12-arm32 -- .github/workflows/
           git add .github/workflows/
           if ! git diff --cached --quiet; then
             git commit -m "Preserve fork GitHub Actions workflows"
@@ -177,12 +177,12 @@ jobs:
           
       - name: Diagnose workflow file changes
         run: |
-          git diff --name-status origin/android12 HEAD -- .github/workflows/
-          git diff origin/android12 HEAD -- .github/workflows/ci.yml
+          git diff --name-status origin/android12-arm32 HEAD -- .github/workflows/
+          git diff origin/android12-arm32 HEAD -- .github/workflows/ci.yml
           
       # 11. Push synced source branch
       - name: Push synced branch
-        run: git push origin HEAD:android12
+        run: git push origin HEAD:android12-arm32
 
       # 12. Generate unique release tag
       - name: Generate release tag
@@ -213,6 +213,6 @@ jobs:
           Minimum supported Android SDK: 29 (Android 10).
           Compile SDK: 37.
           Source branch: android12.
-          Upstream: seijikohara/femto-car-launcher develop.
+          Upstream: gouster4/femto-car-launcher develop.
 
           Built and verified by GitHub Actions."
